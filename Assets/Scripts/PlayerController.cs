@@ -1,15 +1,25 @@
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
 {
     [Header("Movement")]
     public float moveSpeed = 5f;
-    public float verticalSpeed = 2f;
+    public float verticalSpeed = 5f;
 
-    [Header("Look")]
-    public Transform cameraTransform;
+    [Header("Mouse Look")]
     public float mouseSensitivity = 2f;
+
+    [Header("Gamepad Look")]
+    public float gamepadLookSpeed = 140f;
+    public float gamepadDeadZone = 0.12f;
+    public bool invertGamepadY = false;
+
+    [Header("References")]
+    public Camera playerCamera;
 
     private CharacterController controller;
     private float pitch = 0f;
@@ -18,72 +28,78 @@ public class PlayerController : MonoBehaviour
     {
         controller = GetComponent<CharacterController>();
 
-        if (cameraTransform == null && Camera.main != null)
-            cameraTransform = Camera.main.transform;
-    }
-
-    void Start()
-    {
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-
-        if (cameraTransform != null)
-        {
-            float startPitch = cameraTransform.localEulerAngles.x;
-            if (startPitch > 180f)
-                startPitch -= 360f;
-
-            pitch = startPitch;
-        }
+        if (playerCamera == null)
+            playerCamera = Camera.main;
     }
 
     void Update()
     {
-        Look();
-        Move();
+        HandleLook();
+        HandleMovement();
     }
 
-    void Look()
+    void HandleLook()
     {
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
-
-        // IDENTICO A PRIMA:
-        // destra/sinistra ruotano il Player
-        transform.Rotate(0f, mouseX, 0f);
-
-        // sopra/sotto ruotano solamente la Camera
-        // SENZA alcun Clamp: può continuare oltre ±90° e fare giri completi.
-        pitch -= mouseY;
-
-        if (cameraTransform != null)
-            cameraTransform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
-    }
-
-    void Move()
-    {
-        if (cameraTransform == null)
+        if (playerCamera == null)
             return;
 
-        float x = Input.GetAxis("Horizontal");
-        float z = Input.GetAxis("Vertical");
+        // Mouse
+        float lookX = Input.GetAxis("Mouse X") * mouseSensitivity;
+        float lookY = Input.GetAxis("Mouse Y") * mouseSensitivity;
 
-        // W/S seguono esattamente la direzione in cui guarda la camera,
-        // anche verso l'alto o verso il basso.
-        Vector3 direction =
-            cameraTransform.right * x +
-            cameraTransform.forward * z;
+#if ENABLE_INPUT_SYSTEM
+        // Right analog stick
+        Gamepad pad = Gamepad.current;
 
-        // Q/E restano disponibili come movimento verticale opzionale.
+        if (pad != null)
+        {
+            Vector2 rightStick = pad.rightStick.ReadValue();
+
+            if (rightStick.magnitude < gamepadDeadZone)
+                rightStick = Vector2.zero;
+
+            lookX += rightStick.x * gamepadLookSpeed * Time.unscaledDeltaTime;
+
+            float gamepadY = rightStick.y;
+            if (!invertGamepadY)
+                gamepadY = -gamepadY;
+
+            lookY += gamepadY * gamepadLookSpeed * Time.unscaledDeltaTime;
+        }
+#endif
+
+        // Horizontal rotation rotates the player
+        transform.Rotate(Vector3.up * lookX);
+
+        // Vertical rotation rotates only the camera.
+        // No clamp: free vertical look, as in your current version.
+        pitch -= lookY;
+        playerCamera.transform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+    }
+
+    void HandleMovement()
+    {
+        if (playerCamera == null)
+            return;
+
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
+
+        Vector3 forward = playerCamera.transform.forward.normalized;
+        Vector3 right = playerCamera.transform.right.normalized;
+
+        Vector3 movement = (forward * vertical) + (right * horizontal);
+
+        // Keyboard vertical movement
         if (Input.GetKey(KeyCode.E))
-            direction += Vector3.up * (verticalSpeed / moveSpeed);
+            movement += Vector3.up;
 
         if (Input.GetKey(KeyCode.Q))
-            direction -= Vector3.up * (verticalSpeed / moveSpeed);
+            movement -= Vector3.up;
 
-        if (direction.sqrMagnitude > 1f)
-            direction.Normalize();
+        if (movement.sqrMagnitude > 1f)
+            movement.Normalize();
 
-        controller.Move(direction * moveSpeed * Time.deltaTime);
+        controller.Move(movement * moveSpeed * Time.deltaTime);
     }
 }
